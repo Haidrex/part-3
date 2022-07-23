@@ -1,18 +1,17 @@
-const { response } = require('express');
+require('dotenv').config();
 const express = require('express');
 const morgan = require('morgan');
 const cors = require('cors');
+const PhonebookEntry = require('./models/phonebookEntry');
 
 const app = express();
 
+// eslint-disable-next-line no-undef
 const PORT = process.env.PORT || 3001;
 
 app.use(express.json());
-
 app.use(cors());
-
 app.use(express.static('build'));
-
 app.use(
 	morgan(function (tokens, req, res) {
 		return [
@@ -55,8 +54,14 @@ app.get('/', (req, res) => {
 	res.send('<h1>hello world</h1>');
 });
 
-app.get('/api/persons', (req, res) => {
-	res.json(persons);
+app.get('/api/persons', (req, res, next) => {
+	PhonebookEntry.find({})
+		.then((result) => {
+			res.json(result);
+		})
+		.catch((error) => {
+			next(error);
+		});
 });
 
 app.get('/info', (req, res) => {
@@ -64,41 +69,72 @@ app.get('/info', (req, res) => {
 <p>${new Date()}</p>`);
 });
 
-app.get('/api/persons/:id', (req, res) => {
-	const id = req.params.id;
-	const person = persons.find((person) => person.id === Number(id));
-	if (person) {
-		res.json(person);
-	} else {
-		res.status(400).json({ error: `User by id ${id} not found` });
-	}
+app.get('/api/persons/:id', (req, res, next) => {
+	PhonebookEntry.findById(req.params.id)
+		.then((result) => {
+			if (result) {
+				res.json(result);
+			} else {
+				res.status(404).end();
+			}
+		})
+		.catch((error) => {
+			next(error);
+		});
 });
 
-app.delete('/api/persons/:id', (req, res) => {
-	const id = Number(req.params.id);
-	persons = persons.filter((person) => person.id !== id);
-
-	res.status(204).end();
+app.delete('/api/persons/:id', (req, res, next) => {
+	PhonebookEntry.findByIdAndRemove(req.params.id)
+		.then(() => {
+			res.status(204).end();
+		})
+		.catch((error) => next(error));
 });
 
-app.post('/api/persons', (req, res) => {
+app.put('/api/persons/:id', (req, res, next) => {
+	const newPerson = {
+		name: req.body.name,
+		number: req.body.number,
+	};
+	PhonebookEntry.findByIdAndUpdate(req.params.id, newPerson, { new: true })
+		.then((result) => {
+			res.json(result);
+		})
+		.catch((error) => next(error));
+});
+
+app.post('/api/persons', (req, res, next) => {
 	const person = req.body;
 
 	if (!person.name || !person.number) {
 		return res.status(404).json({ error: 'Missing name or number' });
 	}
 
-	const isFound = persons.find((item) => item.name === person.name);
-	if (isFound) {
-		return res
-			.status(404)
-			.json({ error: 'User already exists in the phonebook' });
+	const newPerson = new PhonebookEntry({
+		name: person.name,
+		number: person.number,
+	});
+
+	newPerson
+		.save()
+		.then((savedPerson) => {
+			res.json(savedPerson);
+		})
+		.catch((error) => next(error));
+});
+
+const errorHandler = (error, request, response, next) => {
+	console.error(error.message);
+
+	if (error.name === 'CastError') {
+		return response.status(400).send({ error: 'malformatted id' });
 	}
 
-	person.id = Math.floor(Math.random() * 99999);
-	persons = persons.concat(person);
-	res.json(person);
-});
+	next(error);
+};
+
+// this has to be the last loaded middleware.
+app.use(errorHandler);
 
 app.listen(PORT, () => {
 	console.log(`listening on port ${PORT}`);
